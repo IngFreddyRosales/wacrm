@@ -167,7 +167,22 @@ export async function GET(request: Request) {
     }
 
     return NextResponse.json(
-      { error: 'Verification token mismatch' },
+      { 
+        error: 'Verification token mismatch',
+        debug: {
+          configsCount: configs?.length || 0,
+          providedToken: verifyToken,
+          tokensStatus: configs.map((c: any) => {
+            if (!c.verify_token) return 'empty'
+            try {
+              const dec = decrypt(c.verify_token)
+              return `decrypted_successfully_but_length_is_${dec.length}_(starts_with_${dec.charAt(0)})`
+            } catch (e) {
+              return 'decrypt_failed'
+            }
+          })
+        }
+      },
       { status: 403 }
     )
   } catch (error) {
