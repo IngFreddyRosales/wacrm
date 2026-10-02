@@ -11,6 +11,7 @@ const h = vi.hoisted(() => ({
   state: {
     conv: null as Record<string, unknown> | null,
     autoResponders: [] as { id: string }[],
+    messageSteps: [] as { automation_id: string; step_type: string }[],
     claim: true as boolean,
     updatePayload: null as Record<string, unknown> | null,
     rpcCalls: [] as { name: string; args: unknown }[],
@@ -26,13 +27,42 @@ vi.mock('./admin-client', () => ({
   supabaseAdmin: () => ({
     from: (table: string) => {
       if (table === 'automations') {
-        // .select().eq().eq().in().limit() → active auto-responders
+        // .select().eq().eq().in() → active message-trigger automations
         const chain = {
           select: () => chain,
           eq: () => chain,
           in: () => chain,
-          limit: () =>
-            Promise.resolve({ data: h.state.autoResponders, error: null }),
+          then: (
+            resolve: (value: {
+              data: { id: string }[]
+              error: null
+            }) => unknown,
+          ) => resolve({ data: h.state.autoResponders, error: null }),
+        }
+        return chain
+      }
+      if (table === 'automation_steps') {
+        let stepTypes: string[] | null = null
+        const chain = {
+          select: () => chain,
+          in: (column: string, values: string[]) => {
+            if (column === 'step_type') stepTypes = values
+            return chain
+          },
+          then: (
+            resolve: (value: {
+              data: { automation_id: string; step_type: string }[]
+              error: null
+            }) => unknown,
+          ) =>
+            resolve({
+              data: stepTypes
+                ? h.state.messageSteps.filter((step) =>
+                    stepTypes?.includes(step.step_type),
+                  )
+                : h.state.messageSteps,
+              error: null,
+            }),
         }
         return chain
       }
@@ -88,6 +118,7 @@ beforeEach(() => {
     ai_reply_count: 0,
   }
   h.state.autoResponders = []
+  h.state.messageSteps = []
   h.state.claim = true
   h.state.updatePayload = null
   h.state.rpcCalls = []
@@ -122,9 +153,19 @@ describe('dispatchInboundToAiReply — eligibility gates', () => {
 
   it('stands down when an active message-level automation exists', async () => {
     h.state.autoResponders = [{ id: 'auto-1' }]
+    h.state.messageSteps = [{ automation_id: 'auto-1', step_type: 'send_message' }]
     await dispatchInboundToAiReply(ARGS)
     expect(h.generateReply).not.toHaveBeenCalled()
     expect(h.engineSendText).not.toHaveBeenCalled()
+  })
+
+  it('still replies when an active message trigger only updates CRM data', async () => {
+    h.state.autoResponders = [{ id: 'auto-1' }]
+    h.state.messageSteps = [{ automation_id: 'auto-1', step_type: 'add_tag' }]
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.engineSendText).toHaveBeenCalledWith(
+      expect.objectContaining({ conversationId: 'conv-1', text: 'Hello!' }),
+    )
   })
 
   it('does not send when the atomic slot claim loses the race', async () => {
