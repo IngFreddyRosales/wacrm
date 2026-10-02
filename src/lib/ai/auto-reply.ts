@@ -50,57 +50,6 @@ export async function dispatchInboundToAiReply(
     const config = await loadAiConfig(db, accountId)
     if (!config || !config.autoReplyEnabled) return
 
-    // Deterministic, user-configured responders win over the LLM — the
-    // caller already excludes messages a Flow consumed. Message-level
-    // automations (`new_message_received` / `keyword_match`) are
-    // dispatched independently for this same inbound and may send their
-    // own reply, so if the account has any active one we stand down to
-    // avoid double-texting the customer. (Relationship triggers like
-    // `first_inbound_message` don't count — they're not per-message
-    // auto-responders.)
-    const { data: activeMessageTriggers, error: autoResponderErr } = await db
-      .from('automations')
-      .select('id')
-      .eq('account_id', accountId)
-      .eq('is_active', true)
-      .in('trigger_type', ['new_message_received', 'keyword_match'])
-    if (autoResponderErr) {
-      // Do not risk double-sending if we cannot determine whether a
-      // deterministic message responder is active.
-      console.error(
-        '[ai auto-reply] active responder lookup failed:',
-        autoResponderErr,
-      )
-      return
-    }
-
-    if (activeMessageTriggers && activeMessageTriggers.length > 0) {
-      const automationIds = activeMessageTriggers.map(
-        (automation: { id: string }) => automation.id,
-      )
-      const { data: messageSteps, error: messageStepsErr } = await db
-        .from('automation_steps')
-        .select('automation_id, step_type')
-        .in('automation_id', automationIds)
-        .in('step_type', [
-          'send_message',
-          'send_buttons',
-          'send_list',
-          'send_template',
-        ])
-
-      if (messageStepsErr) {
-        console.error(
-          '[ai auto-reply] active responder steps lookup failed:',
-          messageStepsErr,
-        )
-        return
-      }
-      // Non-message automations (tagging, assignment, CRM updates, etc.)
-      // must not mute the AI responder.
-      if (messageSteps && messageSteps.length > 0) return
-    }
-
     const { data: conv, error: convErr } = await db
       .from('conversations')
       .select('assigned_agent_id, ai_autoreply_disabled, ai_reply_count')

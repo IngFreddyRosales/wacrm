@@ -151,12 +151,14 @@ describe('dispatchInboundToAiReply — eligibility gates', () => {
     expect(systemPrompt).toContain('Returns accepted within 30 days.')
   })
 
-  it('stands down when an active message-level automation exists', async () => {
+  it('does not depend on automations before generating a reply', async () => {
     h.state.autoResponders = [{ id: 'auto-1' }]
     h.state.messageSteps = [{ automation_id: 'auto-1', step_type: 'send_message' }]
     await dispatchInboundToAiReply(ARGS)
-    expect(h.generateReply).not.toHaveBeenCalled()
-    expect(h.engineSendText).not.toHaveBeenCalled()
+    expect(h.generateReply).toHaveBeenCalled()
+    expect(h.engineSendText).toHaveBeenCalledWith(
+      expect.objectContaining({ conversationId: 'conv-1', text: 'Hello!' }),
+    )
   })
 
   it('still replies when an active message trigger only updates CRM data', async () => {
